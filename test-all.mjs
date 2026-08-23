@@ -14497,9 +14497,9 @@ try {
   if (["'config/plugins.yml'", "'plugins.local/'"].every(s => upd.includes(s))) pass('config/plugins.yml + plugins.local/ registered as USER paths (never auto-updated)');
   else fail('plugin USER paths not registered in update-system.mjs');
   // #2354 — cmdRun must only collect results from the requested plugin id.
-  // If a second plugin of the same hook kind is enabled it must NOT bleed in.
+  // If a second plugin of the same hook kind is enabled it must NOT bleed in or be invoked.
   {
-    const { filterResultsForId } = await import(pathToFileURL(join(ROOT, 'plugins/_engine.mjs')).href);
+    const { filterResultsForId, loadPlugins, runHook } = await import(pathToFileURL(join(ROOT, 'plugins/_engine.mjs')).href);
     const fakeResults = [
       { id: 'linkedin-alerts', ok: true, result: [{ title: 'Correct', url: 'https://a.test/1' }] },
       { id: 'gmail',           ok: true, result: [{ title: 'Wrong',   url: 'https://b.test/2' }] },
@@ -14511,6 +14511,38 @@ try {
       pass('cmdRun result isolation: only the requested plugin id\'s results are collected (#2354)');
     } else {
       fail(`cmdRun result isolation broken: got ${JSON.stringify(found)}`);
+    }
+
+    // Manifest-level pre-invocation filtering test:
+    const tmpIsoDir = mkdtempSync(join(tmpdir(), 'co-plugin-iso-'));
+    try {
+      mkdirSync(join(tmpIsoDir, 'plugins', 'p-one'), { recursive: true });
+      mkdirSync(join(tmpIsoDir, 'plugins', 'p-two'), { recursive: true });
+      mkdirSync(join(tmpIsoDir, 'config'), { recursive: true });
+      writeFileSync(join(tmpIsoDir, 'config', 'plugins.yml'), 'plugins:\n  p-one: { enabled: true }\n  p-two: { enabled: true }\n');
+
+      writeFileSync(join(tmpIsoDir, 'plugins', 'p-one', 'manifest.json'), JSON.stringify({
+        id: 'p-one', apiVersion: 1, description: 'Plugin one', humanInTheLoop: true, hooks: ['ingest'], entry: 'index.mjs'
+      }));
+      writeFileSync(join(tmpIsoDir, 'plugins', 'p-two', 'manifest.json'), JSON.stringify({
+        id: 'p-two', apiVersion: 1, description: 'Plugin two', humanInTheLoop: true, hooks: ['ingest'], entry: 'index.mjs'
+      }));
+
+      writeFileSync(join(tmpIsoDir, 'plugins', 'p-one', 'index.mjs'), 'export default { ingest: async () => [{ title: "one", url: "https://1.test" }] };');
+      writeFileSync(join(tmpIsoDir, 'plugins', 'p-two', 'index.mjs'), 'export default { ingest: async () => { globalThis.__unrelatedPluginInvoked = true; return [{ title: "two", url: "https://2.test" }]; } };');
+
+      globalThis.__unrelatedPluginInvoked = false;
+      const loaded = await loadPlugins('ingest', { root: tmpIsoDir, pluginId: 'p-one' });
+      const hookResults = await runHook('ingest', null, { root: tmpIsoDir, pluginId: 'p-one' });
+
+      if (loaded.length === 1 && loaded[0].id === 'p-one' && hookResults.length === 1 && hookResults[0].id === 'p-one' && !globalThis.__unrelatedPluginInvoked) {
+        pass('runHook pre-filters manifests by pluginId and never invokes unrelated plugins (#2354)');
+      } else {
+        fail(`runHook did not isolate invocation: loaded=${loaded.map(p => p.id).join(', ')}, invokedUnrelated=${globalThis.__unrelatedPluginInvoked}`);
+      }
+    } finally {
+      delete globalThis.__unrelatedPluginInvoked;
+      try { rmSync(tmpIsoDir, { recursive: true, force: true }); } catch {}
     }
   }
 
