@@ -2194,6 +2194,27 @@ try {
     fail('validateLockedSections must throw when a locked section does not exist in the source');
   }
 
+  // Unicode-aware comparison test
+  const unicodeCv = '# Education\n* Bachelor of Science (École Polytechnique, Zürich)\n* Über-cool café & résumé\n';
+  const matchingUnicodeHtml = `
+    <h2 class="section-title">Education</h2>
+    <ul>
+      <li>Bachelor of Science (École Polytechnique, Zürich)</li>
+      <li>Über-cool café & résumé</li>
+    </ul>
+  `;
+  let threwUnicode = false;
+  try {
+    validateLockedSections(matchingUnicodeHtml, unicodeCv, ['education']);
+  } catch (e) {
+    threwUnicode = true;
+  }
+  if (!threwUnicode) {
+    pass('validateLockedSections normalizes Unicode characters preserving letters with diacritics');
+  } else {
+    fail('validateLockedSections should match Unicode content cleanly');
+  }
+
 } catch (e) {
   fail(`validateLockedSections tests crashed: ${e.message}`);
 }

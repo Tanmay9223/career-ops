@@ -430,7 +430,7 @@ function normalizeForComparison(text) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&[a-z]+;/gi, ' ')
     .replace(/[#*`_~|•·]/g, ' ') // Strip markdown and bullet chars
-    .replace(/[^\w\s]/g, ' ')    // Strip punctuation to be safe against ATS transformations
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ') // Strip punctuation to be safe against ATS transformations
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
