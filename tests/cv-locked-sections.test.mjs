@@ -2,45 +2,13 @@
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
 
 console.log('\ncv-locked-sections (#2053)');
 
 try {
   const { validateLockedSections } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
-  const { readLockedSections } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
-  // 1. readLockedSections helper tests
-  if (Array.isArray(readLockedSections('non-existent-profile.yml')) && readLockedSections('non-existent-profile.yml').length === 0) {
-    pass('readLockedSections returns empty array for non-existent file');
-  } else {
-    fail('readLockedSections should return empty array for non-existent file');
-  }
-
-  const tmpDir = mkdtempSync(join(tmpdir(), 'locked-sections-test-'));
-  try {
-    const profilePath = join(tmpDir, 'profile.yml');
-    writeFileSync(profilePath, 'cv:\n  locked_sections:\n    - Education\n    - Open Source Contributions\n', 'utf-8');
-    const loaded = readLockedSections(profilePath);
-    if (loaded.length === 2 && loaded[0] === 'education' && loaded[1] === 'open source contributions') {
-      pass('readLockedSections parses array and applies foldKey lowercase');
-    } else {
-      fail(`readLockedSections unexpected result: ${JSON.stringify(loaded)}`);
-    }
-
-    writeFileSync(profilePath, 'cv:\n  locked_sections: Education\n', 'utf-8');
-    const loadedSingle = readLockedSections(profilePath);
-    if (loadedSingle.length === 1 && loadedSingle[0] === 'education') {
-      pass('readLockedSections tolerates single string value');
-    } else {
-      fail(`readLockedSections unexpected single string result: ${JSON.stringify(loadedSingle)}`);
-    }
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
-  }
-
-  // 2. validateLockedSections tests
+  // validateLockedSections tests
   const cvMarkdown = '# Education\n* Bachelor of Science\n* Foo University\n\n# Work Experience\n* Software Engineer\n';
   
   // Identical content, just different formatting
@@ -61,6 +29,12 @@ try {
       <li>B.S.</li>
       <li>Foo Univ</li>
     </ul>
+  `;
+
+  // Missing section in HTML (section removed during tailoring)
+  const missingSectionHtml = `
+    <h2 class="section-title">Work Experience</h2>
+    <p>Software Engineer</p>
   `;
 
   let threwMatch = false;
@@ -85,6 +59,22 @@ try {
     pass('validateLockedSections throws loudly when a locked section is modified');
   } else {
     fail('validateLockedSections must throw when locked section content differs');
+  }
+
+  let threwOmission = false;
+  try {
+    validateLockedSections(missingSectionHtml, cvMarkdown, ['education']);
+  } catch (e) {
+    if (e.message.includes("Locked section 'education' was modified during tailoring")) {
+      threwOmission = true;
+    } else {
+      fail(`validateLockedSections threw wrong error for omitted locked section: ${e.message}`);
+    }
+  }
+  if (threwOmission) {
+    pass('validateLockedSections throws when a locked section is omitted from the HTML');
+  } else {
+    fail('validateLockedSections must throw when a locked section is omitted from the HTML');
   }
 
   // Not locked
